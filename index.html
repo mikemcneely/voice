@@ -1,102 +1,188 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 RGB Voice Control</title>
   <style>
     body {
-      font-family: sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 95vh;
+      min-height: 100vh;
       background-color: #121212;
       color: #ffffff;
       margin: 0;
-      padding: 16px;
+      padding: 20px;
       box-sizing: border-box;
     }
-    .led-row { display: flex; gap: 28px; margin-bottom: 32px; }
-    .led-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; color: #aaa; }
-    .led { width: 34px; height: 34px; border-radius: 50%; background: #2a2a2a; border: 2px solid #444; transition: all 0.2s; }
-    .led.red.on   { background: #ff3b30; border-color: #ff6961; box-shadow: 0 0 18px #ff3b30; }
-    .led.green.on { background: #34c759; border-color: #63e683; box-shadow: 0 0 18px #34c759; }
-    .led.blue.on  { background: #007aff; border-color: #4da3ff; box-shadow: 0 0 18px #007aff; }
 
-    #micBtn {
-      padding: 20px; font-size: 20px; border-radius: 50%; width: 150px; height: 150px;
-      background: #FFB500; border: none; font-weight: bold; cursor: pointer; color: #121212;
-      box-shadow: 0 0 25px rgba(255, 181, 0, 0.4);
+    /* Live Mixed RGB Preview Orb */
+    #rgbOrb {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background-color: #222;
+      border: 2px solid #444;
+      margin-bottom: 10px;
+      transition: all 0.3s ease;
     }
-    #micBtn.listening { background: #ff3b30; color: #fff; }
+    #rgbValues {
+      font-family: monospace;
+      font-size: 14px;
+      color: #aaaaaa;
+      margin-bottom: 32px;
+    }
 
-    .input-row { display: flex; gap: 8px; margin-top: 28px; width: 100%; max-width: 340px; }
+    /* One-Tap Voice Button */
+    #micBtn {
+      width: 165px;
+      height: 165px;
+      border-radius: 50%;
+      border: none;
+      background-color: #FFB500;
+      color: #121212;
+      font-size: 20px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 0 25px rgba(255, 181, 0, 0.4);
+      transition: all 0.2s ease;
+    }
+    #micBtn:active {
+      background-color: #cc9100;
+      transform: scale(0.96);
+    }
+    #micBtn.listening {
+      background-color: #ff3b30;
+      color: #ffffff;
+      box-shadow: 0 0 30px rgba(255, 59, 48, 0.7);
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0%   { transform: scale(1); }
+      50%  { transform: scale(1.06); }
+      100% { transform: scale(1); }
+    }
+
+    /* Text / Keyboard Dictation Fallback */
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 28px;
+      width: 100%;
+      max-width: 340px;
+    }
     #cmdInput {
-      flex: 1; padding: 12px; font-size: 16px; border-radius: 8px;
-      border: 1px solid #444; background: #1e1e1e; color: #fff;
+      flex: 1;
+      padding: 12px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background-color: #1e1e1e;
+      color: #ffffff;
     }
     #sendBtn {
-      padding: 12px 18px; font-size: 16px; font-weight: bold; border-radius: 8px;
-      border: none; background: #FFB500; color: #121212; cursor: pointer;
+      padding: 12px 18px;
+      font-size: 16px;
+      font-weight: bold;
+      border-radius: 8px;
+      border: none;
+      background-color: #FFB500;
+      color: #121212;
+      cursor: pointer;
     }
 
-    #status { margin-top: 24px; font-size: 16px; text-align: center; max-width: 90%; white-space: pre-wrap; }
-    .error-text { color: #ff6961; }
+    #status {
+      margin-top: 24px;
+      font-size: 16px;
+      text-align: center;
+      max-width: 90%;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .error-text {
+      color: #ff6961;
+    }
   </style>
 </head>
 <body>
 
-  <div class="led-row">
-    <div class="led-wrap"><div id="ledRed" class="led red"></div><span>RED</span></div>
-    <div class="led-wrap"><div id="ledGreen" class="led green"></div><span>GREEN</span></div>
-    <div class="led-wrap"><div id="ledBlue" class="led blue"></div><span>BLUE</span></div>
-  </div>
+  <div id="rgbOrb"></div>
+  <div id="rgbValues">R: 0 | G: 0 | B: 0</div>
 
   <button id="micBtn">🎤 PRESS</button>
 
   <div class="input-row">
-    <input id="cmdInput" type="text" placeholder="Tap here & use keyboard mic..." />
+    <input id="cmdInput" type="text" placeholder="Or type a color / brightness..." />
     <button id="sendBtn">Send</button>
   </div>
 
-  <div id="status">Ready. Tap PRESS or type/dictate below.</div>
+  <div id="status">Loading current state...</div>
 
   <script>
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxl636GP8JLucuYb0kZ4c8Z6Du7IcjW2ByxPyIoxTO8pB6wUzfTuLR75oe0UhJwoo_g/exec";
+
     const btn = document.getElementById('micBtn');
     const cmdInput = document.getElementById('cmdInput');
     const sendBtn = document.getElementById('sendBtn');
     const status = document.getElementById('status');
-    const ledRed = document.getElementById('ledRed');
-    const ledGreen = document.getElementById('ledGreen');
-    const ledBlue = document.getElementById('ledBlue');
+    const rgbOrb = document.getElementById('rgbOrb');
+    const rgbValues = document.getElementById('rgbValues');
 
     function setStatus(msg, isError = false) {
       status.innerText = msg;
       status.className = isError ? 'error-text' : '';
     }
 
-    function sendCommand(text) {
+    function updateRgbUI(state) {
+      const r = Number(state.red) || 0;
+      const g = Number(state.green) || 0;
+      const b = Number(state.blue) || 0;
+      const isOff = (r === 0 && g === 0 && b === 0);
+
+      rgbOrb.style.backgroundColor = isOff ? '#222' : `rgb(${r}, ${g}, ${b})`;
+      rgbOrb.style.boxShadow = isOff ? 'none' : `0 0 28px rgb(${r}, ${g}, ${b})`;
+      rgbValues.innerText = `R: ${r} | G: ${g} | B: ${b}`;
+    }
+
+    async function sendCommand(text) {
       const cleaned = text.trim();
       if (!cleaned) return;
       setStatus(`Thinking about: "${cleaned}"...`);
 
-      google.script.run
-        .withSuccessHandler(res => {
-          try {
-            const state = JSON.parse(res);
-            if (state.error) {
-              setStatus(`Backend error: ${state.error}`, true);
-              return;
-            }
-            ledRed.classList.toggle('on', Boolean(state.red));
-            ledGreen.classList.toggle('on', Boolean(state.green));
-            ledBlue.classList.toggle('on', Boolean(state.blue));
-            setStatus(`Current State:\n${res}`);
-          } catch (e) {
-            setStatus(`Unexpected response:\n${res}`, true);
-          }
-        })
-        .withFailureHandler(err => setStatus(`Script error: ${err.message || err}`, true))
-        .processVoiceCommand(cleaned);
+      try {
+        // text/plain avoids CORS preflight (OPTIONS) on Google Apps Script
+        const response = await fetch(SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ transcript: cleaned })
+        });
+
+        const state = await response.json();
+        if (state.error) {
+          setStatus(`Backend error: ${state.error}`, true);
+          return;
+        }
+
+        updateRgbUI(state);
+        setStatus(`Updated:\n${JSON.stringify(state)}`);
+      } catch (err) {
+        setStatus(`Network error: ${err.message}`, true);
+      }
+    }
+
+    // Load the current saved LED state when the page opens
+    async function loadInitialState() {
+      try {
+        const response = await fetch(`${SCRIPT_URL}?action=getState`);
+        const state = await response.json();
+        updateRgbUI(state);
+        setStatus("Tap PRESS to speak.");
+      } catch (err) {
+        setStatus("Ready. Tap PRESS to speak.");
+      }
     }
 
     sendBtn.onclick = () => {
@@ -111,26 +197,46 @@
       }
     });
 
+    // Web Speech API (works directly on GitHub Pages HTTPS)
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      btn.style.display = 'none';
-      setStatus("Browser mic blocked—use your keyboard's mic in the box above.");
+      btn.disabled = true;
+      btn.style.opacity = "0.4";
+      setStatus("Browser voice not supported—use the text box above.", true);
     } else {
       const recognition = new SpeechRecognition();
       recognition.lang = 'en-US';
-      recognition.onstart = () => { btn.classList.add('listening'); btn.innerText = "🔴 LISTENING"; setStatus("Listening..."); };
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        btn.classList.add('listening');
+        btn.innerText = "🔴 LISTENING";
+        setStatus("Listening...");
+      };
       recognition.onspeechend = () => recognition.stop();
-      recognition.onend = () => { btn.classList.remove('listening'); btn.innerText = "🎤 PRESS"; };
+      recognition.onend = () => {
+        btn.classList.remove('listening');
+        btn.innerText = "🎤 PRESS";
+      };
       recognition.onerror = (e) => {
         btn.classList.remove('listening');
         btn.innerText = "🎤 PRESS";
-        setStatus(`Browser mic blocked (${e.error}).\nUse the text box + keyboard mic instead.`, true);
+        setStatus(`Mic error: ${e.error}`, true);
       };
-      recognition.onresult = (e) => sendCommand(e.results[0][0].transcript);
+      recognition.onresult = (e) => {
+        sendCommand(e.results[0][0].transcript);
+      };
+
       btn.onclick = () => {
-        try { recognition.start(); } catch (err) { setStatus(`Mic error: ${err.message}`, true); }
+        try {
+          recognition.start();
+        } catch (err) {
+          setStatus(`Could not start mic: ${err.message}`, true);
+        }
       };
     }
+
+    loadInitialState();
   </script>
 </body>
 </html>
