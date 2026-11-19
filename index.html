@@ -2,239 +2,228 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ESP32 RGB Voice Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ESP32 RGB Voice Controller</title>
   <style>
+    * { box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
-      background-color: #121212;
-      color: #ffffff;
-      margin: 0;
-      padding: 20px;
-      box-sizing: border-box;
+      gap: 24px;
+      padding: 24px;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-
-    /* Live Mixed RGB Preview Orb */
-    #rgbOrb {
-      width: 72px;
-      height: 72px;
+    .orb {
+      width: 150px;
+      height: 150px;
       border-radius: 50%;
-      background-color: #222;
-      border: 2px solid #444;
-      margin-bottom: 10px;
-      transition: all 0.3s ease;
+      background: rgb(0, 0, 0);
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+      transition: background 0.3s ease, box-shadow 0.3s ease;
     }
-    #rgbValues {
-      font-family: monospace;
-      font-size: 14px;
-      color: #aaaaaa;
-      margin-bottom: 32px;
-    }
-
-    /* One-Tap Voice Button */
-    #micBtn {
-      width: 165px;
-      height: 165px;
+    .mic-btn {
+      width: 120px;
+      height: 120px;
       border-radius: 50%;
       border: none;
-      background-color: #FFB500;
-      color: #121212;
-      font-size: 20px;
-      font-weight: bold;
+      background: #2563eb;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
       cursor: pointer;
-      box-shadow: 0 0 25px rgba(255, 181, 0, 0.4);
-      transition: all 0.2s ease;
+      box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+      transition: transform 0.15s ease, background 0.2s ease;
     }
-    #micBtn:active {
-      background-color: #cc9100;
-      transform: scale(0.96);
+    .mic-btn:active { transform: scale(0.95); }
+    .mic-btn.recording {
+      background: #dc2626;
+      box-shadow: 0 0 0 10px rgba(220, 38, 38, 0.25);
     }
-    #micBtn.listening {
-      background-color: #ff3b30;
-      color: #ffffff;
-      box-shadow: 0 0 30px rgba(255, 59, 48, 0.7);
-      animation: pulse 1.2s infinite;
-    }
-    @keyframes pulse {
-      0%   { transform: scale(1); }
-      50%  { transform: scale(1.06); }
-      100% { transform: scale(1); }
-    }
-
-    /* Text / Keyboard Dictation Fallback */
-    .input-row {
+    .text-row {
       display: flex;
       gap: 8px;
-      margin-top: 28px;
       width: 100%;
       max-width: 340px;
     }
-    #cmdInput {
+    input[type="text"] {
       flex: 1;
-      padding: 12px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #f8fafc;
       font-size: 16px;
-      border-radius: 8px;
-      border: 1px solid #444;
-      background-color: #1e1e1e;
-      color: #ffffff;
+      outline: none;
     }
-    #sendBtn {
+    .send-btn {
       padding: 12px 18px;
-      font-size: 16px;
-      font-weight: bold;
-      border-radius: 8px;
+      border-radius: 10px;
       border: none;
-      background-color: #FFB500;
-      color: #121212;
+      background: #334155;
+      color: #f8fafc;
+      font-size: 15px;
+      font-weight: 600;
       cursor: pointer;
     }
-
-    #status {
-      margin-top: 24px;
-      font-size: 16px;
+    .status {
+      min-height: 24px;
+      font-size: 14px;
+      color: #94a3b8;
       text-align: center;
-      max-width: 90%;
-      line-height: 1.5;
-      white-space: pre-wrap;
-    }
-    .error-text {
-      color: #ff6961;
+      max-width: 340px;
     }
   </style>
 </head>
 <body>
 
-  <div id="rgbOrb"></div>
-  <div id="rgbValues">R: 0 | G: 0 | B: 0</div>
+  <div id="orb" class="orb"></div>
 
-  <button id="micBtn">🎤 PRESS</button>
+  <button id="micBtn" class="mic-btn">TAP TO<br>SPEAK</button>
 
-  <div class="input-row">
-    <input id="cmdInput" type="text" placeholder="Or type a color / brightness..." />
-    <button id="sendBtn">Send</button>
+  <div class="text-row">
+    <input id="textInput" type="text" placeholder="Or type a color / effect..." />
+    <button id="sendBtn" class="send-btn">Send</button>
   </div>
 
-  <div id="status">Loading current state...</div>
+  <div id="status" class="status">Ready</div>
 
   <script>
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxl636GP8JLucuYb0kZ4c8Z6Du7IcjW2ByxPyIoxTO8pB6wUzfTuLR75oe0UhJwoo_g/exec";
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxl636GP8JLucuYb0kZ4c8Z6Du7IcjW2ByxPyIoxTO8pB6wUzfTuLR75oe0UhJwoo_g/exec';
 
-    const btn = document.getElementById('micBtn');
-    const cmdInput = document.getElementById('cmdInput');
+    const orb = document.getElementById('orb');
+    const micBtn = document.getElementById('micBtn');
+    const textInput = document.getElementById('textInput');
     const sendBtn = document.getElementById('sendBtn');
-    const status = document.getElementById('status');
-    const rgbOrb = document.getElementById('rgbOrb');
-    const rgbValues = document.getElementById('rgbValues');
+    const statusEl = document.getElementById('status');
 
-    function setStatus(msg, isError = false) {
-      status.innerText = msg;
-      status.className = isError ? 'error-text' : '';
-    }
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let activeStream = null;
+    let autoStopTimer = null;
 
-    function updateRgbUI(state) {
-      const r = Number(state.red) || 0;
-      const g = Number(state.green) || 0;
-      const b = Number(state.blue) || 0;
-      const isOff = (r === 0 && g === 0 && b === 0);
-
-      rgbOrb.style.backgroundColor = isOff ? '#222' : `rgb(${r}, ${g}, ${b})`;
-      rgbOrb.style.boxShadow = isOff ? 'none' : `0 0 28px rgb(${r}, ${g}, ${b})`;
-      rgbValues.innerText = `R: ${r} | G: ${g} | B: ${b}`;
-    }
-
-    async function sendCommand(text) {
-      const cleaned = text.trim();
-      if (!cleaned) return;
-      setStatus(`Thinking about: "${cleaned}"...`);
-
-      try {
-        // text/plain avoids CORS preflight (OPTIONS) on Google Apps Script
-        const response = await fetch(SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ transcript: cleaned })
-        });
-
-        const state = await response.json();
-        if (state.error) {
-          setStatus(`Backend error: ${state.error}`, true);
-          return;
-        }
-
-        updateRgbUI(state);
-        setStatus(`Updated:\n${JSON.stringify(state)}`);
-      } catch (err) {
-        setStatus(`Network error: ${err.message}`, true);
+    function updateOrb(data) {
+      if (data.error) {
+        statusEl.textContent = 'Error: ' + data.error;
+        return;
       }
+      const r = data.red ?? 0;
+      const g = data.green ?? 0;
+      const b = data.blue ?? 0;
+      const eff = data.effect || 'solid';
+      const spd = data.speed || 5;
+
+      orb.style.background = `rgb(${r}, ${g}, ${b})`;
+      orb.style.boxShadow = `0 0 45px rgba(${r}, ${g}, ${b}, 0.75)`;
+      statusEl.textContent = `RGB(${r}, ${g}, ${b}) • ${eff} (speed ${spd})`;
     }
 
-    // Load the current saved LED state when the page opens
     async function loadInitialState() {
       try {
-        const response = await fetch(`${SCRIPT_URL}?action=getState`);
-        const state = await response.json();
-        updateRgbUI(state);
-        setStatus("Tap PRESS to speak.");
-      } catch (err) {
-        setStatus("Ready. Tap PRESS to speak.");
+        const res = await fetch(SCRIPT_URL + '?action=getState');
+        const data = await res.json();
+        updateOrb(data);
+      } catch (e) {
+        statusEl.textContent = 'Ready (offline sync skipped)';
       }
     }
 
-    sendBtn.onclick = () => {
-      sendCommand(cmdInput.value);
-      cmdInput.value = '';
-    };
+    async function sendPayload(payloadObj) {
+      statusEl.textContent = 'Sending to Gemini...';
+      try {
+        const res = await fetch(SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify(payloadObj)
+        });
+        const data = await res.json();
+        updateOrb(data);
+      } catch (err) {
+        statusEl.textContent = 'Network error: ' + err.message;
+      }
+    }
 
-    cmdInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        sendCommand(cmdInput.value);
-        cmdInput.value = '';
+    function getSupportedMimeType() {
+      const types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'];
+      for (const t of types) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+      }
+      return '';
+    }
+
+    async function startRecording() {
+      try {
+        activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = getSupportedMimeType();
+        mediaRecorder = mimeType ? new MediaRecorder(activeStream, { mimeType }) : new MediaRecorder(activeStream);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          clearTimeout(autoStopTimer);
+          if (activeStream) {
+            activeStream.getTracks().forEach(track => track.stop());
+            activeStream = null;
+          }
+          micBtn.classList.remove('recording');
+          micBtn.innerHTML = 'TAP TO<br>SPEAK';
+
+          const finalMime = mediaRecorder.mimeType || mimeType || 'audio/mp4';
+          const blob = new Blob(audioChunks, { type: finalMime });
+
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64Audio = reader.result.split(',')[1];
+            sendPayload({ audioBase64: base64Audio, mimeType: finalMime });
+          };
+          reader.readAsDataURL(blob);
+        };
+
+        mediaRecorder.start();
+        micBtn.classList.add('recording');
+        micBtn.innerHTML = 'TAP TO<br>STOP';
+        statusEl.textContent = 'Listening... (tap again to send)';
+
+        // Auto-stop after 6 seconds so it never records indefinitely
+        autoStopTimer = setTimeout(() => {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+          }
+        }, 6000);
+      } catch (err) {
+        statusEl.textContent = 'Mic error: ' + err.message;
+      }
+    }
+
+    micBtn.addEventListener('click', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      } else {
+        startRecording();
       }
     });
 
-    // Web Speech API (works directly on GitHub Pages HTTPS)
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      btn.disabled = true;
-      btn.style.opacity = "0.4";
-      setStatus("Browser voice not supported—use the text box above.", true);
-    } else {
-      const recognition = new SpeechRecognition();
-      recognition.lang = 'en-US';
-      recognition.interimResults = false;
-
-      recognition.onstart = () => {
-        btn.classList.add('listening');
-        btn.innerText = "🔴 LISTENING";
-        setStatus("Listening...");
-      };
-      recognition.onspeechend = () => recognition.stop();
-      recognition.onend = () => {
-        btn.classList.remove('listening');
-        btn.innerText = "🎤 PRESS";
-      };
-      recognition.onerror = (e) => {
-        btn.classList.remove('listening');
-        btn.innerText = "🎤 PRESS";
-        setStatus(`Mic error: ${e.error}`, true);
-      };
-      recognition.onresult = (e) => {
-        sendCommand(e.results[0][0].transcript);
-      };
-
-      btn.onclick = () => {
-        try {
-          recognition.start();
-        } catch (err) {
-          setStatus(`Could not start mic: ${err.message}`, true);
-        }
-      };
+    function handleTextSubmit() {
+      const text = textInput.value.trim();
+      if (!text) return;
+      textInput.value = '';
+      sendPayload({ transcript: text });
     }
+
+    sendBtn.addEventListener('click', handleTextSubmit);
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleTextSubmit();
+    });
 
     loadInitialState();
   </script>
