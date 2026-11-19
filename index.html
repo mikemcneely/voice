@@ -26,7 +26,6 @@
       background: rgb(0, 0, 0);
       border: 3px solid rgba(255, 255, 255, 0.15);
       box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
-      transition: background 0.3s ease, box-shadow 0.3s ease;
     }
     .mic-btn {
       width: 120px;
@@ -109,6 +108,92 @@
     let activeStream = null;
     let autoStopTimer = null;
 
+    // Live orb animation state
+    let orbState = { r: 0, g: 0, b: 0, effect: 'solid', speed: 5, startTime: performance.now() };
+    let lastFlickerTime = 0;
+    let flickerColor = { r: 255, g: 80, b: 0 };
+
+    function setOrbVisual(r, g, b) {
+      r = Math.max(0, Math.min(255, Math.round(r)));
+      g = Math.max(0, Math.min(255, Math.round(g)));
+      b = Math.max(0, Math.min(255, Math.round(b)));
+      orb.style.background = `rgb(${r}, ${g}, ${b})`;
+      orb.style.boxShadow = `0 0 45px rgba(${r}, ${g}, ${b}, 0.75)`;
+    }
+
+    function hsvToRgb(h, s, v) {
+      const c = v * s;
+      const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+      const m = v - c;
+      let rf = 0, gf = 0, bf = 0;
+
+      if (h < 60)       { rf = c; gf = x; bf = 0; }
+      else if (h < 120) { rf = x; gf = c; bf = 0; }
+      else if (h < 180) { rf = 0; gf = c; bf = x; }
+      else if (h < 240) { rf = 0; gf = x; bf = c; }
+      else if (h < 300) { rf = x; gf = 0; bf = c; }
+      else              { rf = c; gf = 0; bf = x; }
+
+      return [(rf + m) * 255, (gf + m) * 255, (bf + m) * 255];
+    }
+
+    function animateOrb(now) {
+      const elapsedMs = now - orbState.startTime;
+      const t = elapsedMs / 1000;
+      const spd = orbState.speed / 5; // 1..10 mapped to 0.2x..2.0x
+      const { r, g, b, effect } = orbState;
+
+      switch (effect) {
+        case 'breathe': {
+          const wave = 0.5 - 0.5 * Math.cos(t * 2.0 * spd);
+          const scale = 0.10 + 0.90 * wave;
+          setOrbVisual(r * scale, g * scale, b * scale);
+          break;
+        }
+        case 'pulse': {
+          const cycle = (t * 1.1 * spd) % 1.0;
+          let scale = 0.08;
+          if (cycle < 0.15) {
+            scale = Math.sin((cycle / 0.15) * Math.PI);
+          } else if (cycle > 0.22 && cycle < 0.37) {
+            scale = 0.7 * Math.sin(((cycle - 0.22) / 0.15) * Math.PI);
+          }
+          setOrbVisual(r * scale, g * scale, b * scale);
+          break;
+        }
+        case 'fireplace': {
+          if (now - lastFlickerTime >= 100 / spd) {
+            lastFlickerTime = now;
+            const inten = 0.35 + Math.random() * 0.65;
+            flickerColor.r = 255 * inten;
+            flickerColor.g = (35 + Math.random() * 65) * inten;
+            flickerColor.b = 0;
+          }
+          setOrbVisual(flickerColor.r, flickerColor.g, flickerColor.b);
+          break;
+        }
+        case 'police': {
+          const step = Math.floor((elapsedMs * spd) / 120) % 4;
+          if (step === 0)      setOrbVisual(255, 0, 0);
+          else if (step === 2) setOrbVisual(0, 0, 255);
+          else                 setOrbVisual(0, 0, 0);
+          break;
+        }
+        case 'rainbow': {
+          const h = (t * 90 * spd) % 360;
+          const [rr, gg, bb] = hsvToRgb(h, 1.0, 1.0);
+          setOrbVisual(rr, gg, bb);
+          break;
+        }
+        case 'solid':
+        default:
+          setOrbVisual(r, g, b);
+          break;
+      }
+
+      requestAnimationFrame(animateOrb);
+    }
+
     function updateOrb(data) {
       if (data.error) {
         statusEl.textContent = 'Error: ' + data.error;
@@ -118,10 +203,9 @@
       const g = data.green ?? 0;
       const b = data.blue ?? 0;
       const eff = data.effect || 'solid';
-      const spd = data.speed || 5;
+      const spd = Math.max(1, Math.min(10, data.speed || 5));
 
-      orb.style.background = `rgb(${r}, ${g}, ${b})`;
-      orb.style.boxShadow = `0 0 45px rgba(${r}, ${g}, ${b}, 0.75)`;
+      orbState = { r, g, b, effect: eff, speed: spd, startTime: performance.now() };
       statusEl.textContent = `RGB(${r}, ${g}, ${b}) • ${eff} (speed ${spd})`;
     }
 
@@ -194,7 +278,6 @@
         micBtn.innerHTML = 'TAP TO<br>STOP';
         statusEl.textContent = 'Listening... (tap again to send)';
 
-        // Auto-stop after 6 seconds so it never records indefinitely
         autoStopTimer = setTimeout(() => {
           if (mediaRecorder && mediaRecorder.state === 'recording') {
             mediaRecorder.stop();
@@ -225,6 +308,7 @@
       if (e.key === 'Enter') handleTextSubmit();
     });
 
+    requestAnimationFrame(animateOrb);
     loadInitialState();
   </script>
 </body>
