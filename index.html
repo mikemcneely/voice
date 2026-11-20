@@ -103,10 +103,9 @@
     const sendBtn = document.getElementById('sendBtn');
     const statusEl = document.getElementById('status');
 
-    let mediaRecorder = null;
-    let audioChunks = [];
-    let activeStream = null;
-    let autoStopTimer = null;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let isListening = false;
 
     // Live orb animation state
     let orbState = { r: 0, g: 0, b: 0, effect: 'solid', speed: 5, startTime: performance.now() };
@@ -140,7 +139,7 @@
     function animateOrb(now) {
       const elapsedMs = now - orbState.startTime;
       const t = elapsedMs / 1000;
-      const spd = orbState.speed / 5; // 1..10 mapped to 0.2x..2.0x
+      const spd = orbState.speed / 5;
       const { r, g, b, effect } = orbState;
 
       switch (effect) {
@@ -219,13 +218,13 @@
       }
     }
 
-    async function sendPayload(payloadObj) {
-      statusEl.textContent = 'Sending to Gemini...';
+    async function sendCommand(transcript) {
+      statusEl.textContent = `Heard: "${transcript}" — sending...`;
       try {
         const res = await fetch(SCRIPT_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify(payloadObj)
+          body: JSON.stringify({ transcript })
         });
         const data = await res.json();
         updateOrb(data);
@@ -234,65 +233,47 @@
       }
     }
 
-    function getSupportedMimeType() {
-      const types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'];
-      for (const t of types) {
-        if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+    function startListening() {
+      if (!SpeechRecognition) {
+        statusEl.textContent = 'Voice API not supported in this browser—use the text box.';
+        return;
       }
-      return '';
-    }
 
-    async function startRecording() {
-      try {
-        activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mimeType = getSupportedMimeType();
-        mediaRecorder = mimeType ? new MediaRecorder(activeStream, { mimeType }) : new MediaRecorder(activeStream);
-        audioChunks = [];
+      recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
 
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) audioChunks.push(e.data);
-        };
-
-        mediaRecorder.onstop = () => {
-          clearTimeout(autoStopTimer);
-          if (activeStream) {
-            activeStream.getTracks().forEach(track => track.stop());
-            activeStream = null;
-          }
-          micBtn.classList.remove('recording');
-          micBtn.innerHTML = 'TAP TO<br>SPEAK';
-
-          const finalMime = mediaRecorder.mimeType || mimeType || 'audio/mp4';
-          const blob = new Blob(audioChunks, { type: finalMime });
-
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64Audio = reader.result.split(',')[1];
-            sendPayload({ audioBase64: base64Audio, mimeType: finalMime });
-          };
-          reader.readAsDataURL(blob);
-        };
-
-        mediaRecorder.start();
+      recognition.onstart = () => {
+        isListening = true;
         micBtn.classList.add('recording');
-        micBtn.innerHTML = 'TAP TO<br>STOP';
-        statusEl.textContent = 'Listening... (tap again to send)';
+        micBtn.innerHTML = 'LISTENING...';
+        statusEl.textContent = 'Speak now...';
+      };
 
-        autoStopTimer = setTimeout(() => {
-          if (mediaRecorder && mediaRecorder.state === 'recording') {
-            mediaRecorder.stop();
-          }
-        }, 6000);
-      } catch (err) {
-        statusEl.textContent = 'Mic error: ' + err.message;
-      }
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        sendCommand(transcript);
+      };
+
+      recognition.onerror = (event) => {
+        statusEl.textContent = 'Mic error: ' + event.error;
+      };
+
+      recognition.onend = () => {
+        isListening = false;
+        micBtn.classList.remove('recording');
+        micBtn.innerHTML = 'TAP TO<br>SPEAK';
+      };
+
+      recognition.start();
     }
 
     micBtn.addEventListener('click', () => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
+      if (isListening && recognition) {
+        recognition.stop();
       } else {
-        startRecording();
+        startListening();
       }
     });
 
@@ -300,7 +281,7 @@
       const text = textInput.value.trim();
       if (!text) return;
       textInput.value = '';
-      sendPayload({ transcript: text });
+      sendCommand(text);
     }
 
     sendBtn.addEventListener('click', handleTextSubmit);
